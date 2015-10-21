@@ -10,17 +10,25 @@
 	<span id="example"></span>
 	<script src="../js/gyro.js"></script>
 	<script>
-		gyro.startTracking(function(o) {
+		gyro.init();
+		setInterval(function(){
+			var o = gyro.getData();
 			var b = document.getElementById('example'),
-					f = document.getElementById('features');
+				f = document.getElementById('features');
 			f.innerHTML = gyro.getFeatures();
 			b.innerHTML = "<p> x = " + o.x + "</p>" +
-										"<p> y = " + o.y + "</p>" +
-										"<p> z = " + o.z + "</p>" +
-										"<p> alpha = " + o.alpha + "</p>" +
-										"<p> beta = " + o.beta + "</p>" +
-										"<p> gamma = " + o.gamma + "</p>";
-		});
+				"<p> y = " + o.y + "</p>" +
+				"<p> z = " + o.z + "</p>" +
+				"<p> ax = " + o.ax + "</p>" +
+				"<p> ay = " + o.ay + "</p>" +
+				"<p> az = " + o.az + "</p>" +
+				"<p> alpha = " + o.alpha + "</p>" +
+				"<p> beta = " + o.beta + "</p>" +
+				"<p> gamma = " + o.gamma + "</p>" +
+				"<p> rawAlpha = " + o.rawAlpha + "</p>" +
+				"<p> rawBeta = " + o.rawBeta + "</p>" +
+				"<p> rawGamma = " + o.rawGamma + "</p>";
+		}, 500);
 	</script>
 </body>
 </html>

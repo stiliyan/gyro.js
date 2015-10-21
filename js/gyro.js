@@ -41,14 +41,26 @@
 				rawGamma: 0
 			},
 			interval = null,
-			features = [];
+			features = [],
+			MozOrientationListener,
+			deviceOrientationListener,
+			deviceMotionListener;
 
 	var gyro = {};
 
 	/**
 	 * @public
 	 */
-	gyro.frequency = 500; //ms
+
+	gyro.init = function() {
+		setupListeners();
+	};
+
+	gyro.stop = function() {
+		if(MozOrientationListener) window.removeEventListener('MozOrientation', MozOrientationListener, true);
+		if(deviceOrientationListener) window.removeEventListener('deviceorientation', deviceOrientationListener, true);
+		if(deviceMotionListener) window.removeEventListener('devicemotion', deviceMotionListener, true);
+	};
 
 	gyro.calibrate = function() {
 		for (var i in measurements) {
@@ -56,18 +68,8 @@
 		}
 	};
 
-	gyro.getOrientation = function() {
+	gyro.getData = function() {
 		return measurements;
-	};
-
-	gyro.startTracking = function(callback) {
-		interval = setInterval(function() {
-			callback(measurements);
-		}, gyro.frequency);
-	};
-
-	gyro.stopTracking = function() {
-		clearInterval(interval);
 	};
 
 	/**
@@ -187,27 +189,32 @@
 				features.push('MozOrientation');
 				e.target.removeEventListener('MozOrientation', MozOrientationInitListener, true);
 
-				e.target.addEventListener('MozOrientation', function(e) {
+				MozOrientationListener = function(e) {
 					measurements.x = e.x - calibration.x;
 					measurements.y = e.y - calibration.y;
 					measurements.z = e.z - calibration.z;
-				}, true);
+				};
+				e.target.addEventListener('MozOrientation', MozOrientationListener, true);
 			}
-			function deviceMotionListener (e) {
+			function deviceMotionInitListener (e) {
 				features.push('devicemotion');
-				e.target.removeEventListener('devicemotion', deviceMotionListener, true);
+				e.target.removeEventListener('devicemotion', deviceMotionInitListener, true);
 
-				e.target.addEventListener('devicemotion', function(e) {
+				deviceMotionListener = function(e) {
 					measurements.x = e.accelerationIncludingGravity.x - calibration.x;
 					measurements.y = e.accelerationIncludingGravity.y - calibration.y;
 					measurements.z = e.accelerationIncludingGravity.z - calibration.z;
-				}, true);
+					measurements.ax = e.acceleration.x;
+					measurements.ay = e.acceleration.y;
+					measurements.az = e.acceleration.z;
+				};
+				e.target.addEventListener('devicemotion', deviceMotionListener, true);
 			}
-			function deviceOrientationListener (e) {
+			function deviceOrientationInitListener (e) {
 				features.push('deviceorientation');
-				e.target.removeEventListener('deviceorientation', deviceOrientationListener, true);
+				e.target.removeEventListener('deviceorientation', deviceOrientationInitListener, true);
 
-				e.target.addEventListener('deviceorientation', function(e) {
+				deviceOrientationListener = function(e) {
 					var calib = eulerToQuaternion({
 						alpha: calibration.rawAlpha,
 						beta: calibration.rawBeta,
@@ -228,14 +235,14 @@
 					measurements.rawAlpha = e.alpha;
 					measurements.rawBeta = e.beta;
 					measurements.rawGamma = e.gamma;
-				}, true);
+				};
+				e.target.addEventListener('deviceorientation', deviceOrientationListener, true);
 			}
 
 			window.addEventListener('MozOrientation', MozOrientationInitListener, true);
-			window.addEventListener('devicemotion', deviceMotionListener, true);
-			window.addEventListener('deviceorientation', deviceOrientationListener, true);
+			window.addEventListener('devicemotion', deviceMotionInitListener, true);
+			window.addEventListener('deviceorientation', deviceOrientationInitListener, true);
 		}
-		setupListeners();
 	}
 
 	return gyro;
