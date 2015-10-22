@@ -3,32 +3,276 @@
 <head> 
 	<meta charset="utf-8" /> 
 	<title>gyro.js - easy access to your web browsers built in accelerometer's and gyroscope's</title>
+	<style>
+		html, body { margin: 0; padding: 0;}
+		canvas { border: 1px solid black;}
+	</style>
 </head>
 <body>
-	<p>This Example just print's the raw accelerometer and gyro data. Will return null if no device information is found.</p>
+	<canvas id="c"></canvas>
 	<p>gyro.getFeatures: <span id="features"></span></p>
 	<span id="example"></span>
+	<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.js"></script>
+	<!--<script src="../js/fabric.min.js"></script>-->
 	<script src="../js/gyro.js"></script>
 	<script>
+
+	var clamp = function (a,b,c)  {
+		return Math.max(b,Math.min(c,a));
+	};
+
+	var midPointBtwn = function (p1, p2) {
+ 		return {
+		    x: p1.x + (p2.x - p1.x) / 2,
+		    y: p1.y + (p2.y - p1.y) / 2
+		};
+	};
+
+	$(function(){
+		var before = new Date().getTime(),
+			now,
+			dt,
+			sampleData,
+
+			// determine side-to-side movement:
+
+			// acc, jerk, velocity, displacement:
+			data = {
+				
+				// time:
+				t : [0],
+
+				// left and right:
+				ax : [0],
+				jx : [0],
+				vx : [0],
+				dx : [0],
+				
+				// up and down:
+				ay : [0],
+				jy : [0],
+				vy : [0],
+				dy : [0],
+				// forward and back:
+				az : [0],
+				jz : [0],
+				vz : [0],
+				dz : [0]
+
+			},
+			jx, jy, jz,
+			vx, vy, vz,
+			dx, dy, dz,
+			sampleCount = 0,
+			_bufferLength = 1024,
+			_w,
+			_h,
+			samplingPeriod = 3000,	// ms we spend listening, before restarting 
+			start = new Date().getTime(),
+			curCol = 0,
+			_c = document.getElementById('c'),
+			_ctx = _c.getContext('2d'),
+			_bgGrd,
+			sliceWidth,
+			sliceHeight,
+			_grd;
+ 		
+ 		_w = window.innerWidth;
+ 		_h = _w;
+ 		sliceWidth = _w / samplingPeriod;
+ 		sliceHeight = _h / samplingPeriod;
+
+		// jerk = da / dt
+		// velocity = initial velocity + acceleration * dt
+		// displacement = initial displacement + current velocity * dt
+
 		gyro.init();
+		c.width = _w;
+		c.height = _h;
+
+
+		_bgGrd = _ctx.createLinearGradient(_w / 2, 0, _w / 2, _h);
+
+		_bgGrd.addColorStop(0, 'white');
+		_bgGrd.addColorStop(1, '#FDF8FF');
+
+
+		_grd = _ctx.createLinearGradient(0, _h / 2, _w, _h / 2);
+		_grd.addColorStop(0,"#FB9CE7");
+		_grd.addColorStop(0.25,"#05158F");
+		_grd.addColorStop(0.5, "#4391CD");
+		_grd.addColorStop(0.75, "#5FF0FD");
+		_grd.addColorStop(1, "#BDF5FD");
+
+		_grdVert = _ctx.createLinearGradient(0, _h, _w/2, 0);
+		_grdVert.addColorStop(0,"#FB9CE7");
+		_grdVert.addColorStop(0.25,"#05158F");
+		_grdVert.addColorStop(0.5, "#4391CD");
+		_grdVert.addColorStop(0.75, "#5FF0FD");
+		_grdVert.addColorStop(1, "#BDF5FD");
+
+
+		_ctx.fillStyle = _bgGrd;
+		_ctx.fillRect(0,0,_w,_h);
+
+		_ctx.lineJoin = 'butt';
+		_ctx.lineCap = 'round';
+
 		setInterval(function(){
-			var o = gyro.getData();
+			now = new Date().getTime();
+			dt = now - before;
+			dt /= 1000;
+			data.t.push(now);
+
+			sampleData = gyro.getData();
+
+			sampleData.ax = Math.abs(sampleData.ax) > 0.0 ? sampleData.ax : 0;
+			sampleData.ay = Math.abs(sampleData.ay) > 0.0 ? sampleData.ay : 0;
+			sampleData.az = Math.abs(sampleData.az) > 0.0 ? sampleData.az : 0;
+
+			data.ax.push(sampleData.ax);
+
+			// determine jerk alongside x:
+			jx = sampleData.ax - data.ax[sampleCount] / dt;
+			vx = sampleData.ax * dt + data.vx[sampleCount] * .99;
+			dx = vx * dt + data.dx[sampleCount];
+
+			data.jx.push(jx);
+			data.vx.push(vx);
+			data.dx.push(dx);
+
+			data.ay.push(sampleData.ay);
+			// determine jerk alongside y:
+			jy = sampleData.ay - data.ay[sampleCount] / dt;
+			vy = sampleData.ay * dt + data.vy[sampleCount] * .99;
+			dy = vy * dt + data.dy[sampleCount];
+
+			data.jy.push(jy);
+			data.vy.push(vy);
+			data.dy.push(dy);
+
+			data.az.push(sampleData.az);
+			// determine jerk alongside y:
+			jz = sampleData.az - data.az[sampleCount] / dt;
+			vz = sampleData.az * dt + data.vz[sampleCount] * .99;
+			dz = vz * dt + data.dz[sampleCount];
+
+			data.jz.push(jz);
+			data.vz.push(vz);
+			data.dz.push(dz);
+
+			// visualize acceleration:
+			// xp += data.vx[sampleCount + 1] * dt * 20;
+			// yp += data.vy[sampleCount + 1] * dt * 20;
+			// xp = clamp(xp, 5, w-5);
+			// yp = clamp(yp, 5, h-5);
+
+			_ctx.lineWidth = Math.max(6 + sampleData.az * 2, 1);
+			_ctx.strokeStyle = _grd;
+	        _ctx.beginPath();
+
+	        // plot vertical acceleration:
+	        var x1 = Math.floor(sliceWidth * (before - start));
+	        var y1 = Math.floor(clamp((_h - data.ay[sampleCount] * -10) / 2, 2, _h - 2));
+	        var x2 = Math.floor(sliceWidth * (now - start));
+	        var y2 = Math.floor(clamp((_h - sampleData.ay * -10) / 2, 2, _h-2));
+
+	        _ctx.moveTo(x1, y1);
+	        _ctx.lineTo(x2, y2);
+			_ctx.stroke();
+
+			// plot horizontal accelaration:
+			_ctx.strokeStyle = _grdVert;
+	        _ctx.beginPath();
+	        x1 = Math.floor(clamp((_w - data.ax[sampleCount] * -10) / 2, 2, _w - 2));
+	        y1 = _h - Math.floor(sliceHeight * (before - start));
+	        x2 = Math.floor(clamp((_w - sampleData.ax * -10) / 2, 2, _w-2));
+	        y2 = _h - Math.floor(sliceHeight * (now - start));
+
+	        _ctx.moveTo(x1, y1);
+	        var midPoint = midPointBtwn({x:x1, y:y1}, {x:x2,y:y2});
+
+	        // _ctx.lineTo(x2, y2);
+	        _ctx.quadraticCurveTo(x1, y1, midPoint.x, midPoint.y);
+	        _ctx.quadraticCurveTo(midPoint.x, midPoint.y, x2, y2);
+			_ctx.stroke();
+
+			before = now;
+
+	        
+	        // min/max:
+	        // loop around the canvas when we reach the end
+			sampleCount++;
+
+
+			if (sampleCount >= _bufferLength) {
+				data.ax.shift();
+				data.ay.shift();
+				data.az.shift();
+				data.vx.shift();
+				data.vy.shift();
+				data.vz.shift();
+				data.dx.shift();
+				data.dy.shift();
+				data.dz.shift();
+				data.jx.shift();
+				data.jy.shift();
+				data.jz.shift();
+				sampleCount--;
+			}
+	        
+	        if(now - start > samplingPeriod) {
+	        	sampleCount = 0;
+	        	data = {
+				
+				// time:
+				t : [0],
+
+				// left and right:
+				ax : [0],
+				jx : [0],
+				vx : [0],
+				dx : [0],
+				
+				// up and down:
+				ay : [0],
+				jy : [0],
+				vy : [0],
+				dy : [0],
+				// forward and back:
+				az : [0],
+				jz : [0],
+				vz : [0],
+				dz : [0]
+
+			};
+	            start = now;
+	            _ctx.fillStyle = _bgGrd;
+	            _ctx.fillRect(0,0,_w,_h);
+	        }
+
+
+
 			var b = document.getElementById('example'),
 				f = document.getElementById('features');
 			f.innerHTML = gyro.getFeatures();
-			b.innerHTML = "<p> x = " + o.x + "</p>" +
-				"<p> y = " + o.y + "</p>" +
-				"<p> z = " + o.z + "</p>" +
-				"<p> ax = " + o.ax + "</p>" +
-				"<p> ay = " + o.ay + "</p>" +
-				"<p> az = " + o.az + "</p>" +
-				"<p> alpha = " + o.alpha + "</p>" +
-				"<p> beta = " + o.beta + "</p>" +
-				"<p> gamma = " + o.gamma + "</p>" +
-				"<p> rawAlpha = " + o.rawAlpha + "</p>" +
-				"<p> rawBeta = " + o.rawBeta + "</p>" +
-				"<p> rawGamma = " + o.rawGamma + "</p>";
-		}, 500);
+
+			b.innerHTML = 
+				"<p> dt = " + dt + "s </p><br>" + 
+				"<p> ax = " + sampleData.ax + " m/s^2</p>" +
+				"<p> vx = " + vx + "</p>" +
+				"<p> dx = " + dx + "</p>" +
+				"<p> jx = " + jx + "</p>" +
+				"<br><p> ay = " + sampleData.ay + " m/s^2</p>" +
+				"<p> vy = " + vy + "</p>" +
+				"<p> dy = " + dy + "</p>" +
+				"<p> jy = " + jy + "</p>" +
+				"<br><p> az = " + sampleData.az + " m/s^2</p>" +
+				"<p> vz = " + vz + "</p>" +
+				"<p> dz = " + dz + "</p>" +
+				"<p> jz = " + jz + "</p>";
+		}, 10);
+	});
 	</script>
 </body>
 </html>
