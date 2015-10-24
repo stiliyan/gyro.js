@@ -10,11 +10,14 @@
 </head>
 <body>
 	<canvas id="c"></canvas>
+	<canvas id="jc"></canvas>
 	<p>gyro.getFeatures: <span id="features"></span></p>
 	<span id="example"></span>
 	<script src="//ajax.googleapis.com/ajax/libs/jquery/1.11.2/jquery.js"></script>
 	<!--<script src="../js/fabric.min.js"></script>-->
-	<script src="../js/gyro.js"></script>
+	<script src="../../demo5/js/utils.js"></script>
+	<script src="../../demo5/js/accelerometer.js"></script>
+	<!--<script src="../js/gyro.js"></script>-->
 	<script>
 
 	var clamp = function (a,b,c)  {
@@ -28,54 +31,70 @@
 		};
 	};
 
+	var increment = function (v3, x, y, z) {
+		v3[0] += x;
+		v3[1] += y;
+		v3[2] += z;
+		return v3;
+	}
+
+	var toTwoDecimalPlaces = function(v3) {
+		v3[0] = +v3[0].toFixed(2);
+		v3[1] = +v3[1].toFixed(2);
+		v3[2] = +v3[2].toFixed(2);
+	}
+
+	var getSign = function(n) {
+		return n >= 0;
+	}
+
 	$(function(){
 		var before = new Date().getTime(),
 			now,
 			dt,
+			shakeyMinThreshold = 15,
+			sideToSideMaxThreshold = 10,
+			sideToSideMinThreshold = 5,
+
+			data,
 			sampleData,
-
-			// determine side-to-side movement:
-
-			// acc, jerk, velocity, displacement:
-			data = {
-				
-				// time:
-				t : [0],
-
-				// left and right:
-				ax : [0],
-				jx : [0],
-				vx : [0],
-				dx : [0],
-				
-				// up and down:
-				ay : [0],
-				jy : [0],
-				vy : [0],
-				dy : [0],
-				// forward and back:
-				az : [0],
-				jz : [0],
-				vz : [0],
-				dz : [0]
-
-			},
-			jx, jy, jz,
-			vx, vy, vz,
-			dx, dy, dz,
 			sampleCount = 0,
 			_bufferLength = 1024,
 			_w,
 			_h,
 			samplingPeriod = 3000,	// ms we spend listening, before restarting 
-			start = new Date().getTime(),
+			waitPeriod = 7000,
+			// start = data.t[0],
+			start,
 			curCol = 0,
 			_c = document.getElementById('c'),
 			_ctx = _c.getContext('2d'),
+			_jerkC = document.getElementById('jc'),
+			_jCtx = _jerkC.getContext('2d'),
 			_bgGrd,
 			sliceWidth,
 			sliceHeight,
-			_grd;
+			_grd,
+			interval,
+			energy,
+			stress,
+			lastCrossingX = 1,
+			lastCrossingY = 1,
+			lastCrossingZ = 1,
+			moodMatrix = [
+				'INDIFFERENT', 'TRANQUIL', 'RELAXED', 'JOYFUL',
+				'PEACEFUL', 'JUBILANT', 'CAREFREE', 'SILLY',
+				'CONFIDENT', 'OPTIMISTIC', 'CALM', 'CRFEATIVE',
+				'REFRESHED', 'INVIGORATED', 'ENERGIZED', 'ANXIOUS',
+				'EXHILARATED', 'INSPIDER', 'WILD', 'WORRIED'
+			],
+			moodColors = [
+				'#74637F', '#00AD9C', '#FFB380', '#006142',
+				'#B6C1FF', '#F6A800', '#FF6559', '#FFD94F',
+				'#D11E15', '#D03362', '#B78FC1', '#FF00B1',
+				'#5BC2EF', '#005FB9', '#FF5500', '#7A2E36',
+				'#C5002E', '#39835D', '#6E328A', '#626B99'
+			];
  		
  		_w = window.innerWidth;
  		_h = _w;
@@ -86,9 +105,13 @@
 		// velocity = initial velocity + acceleration * dt
 		// displacement = initial displacement + current velocity * dt
 
-		gyro.init();
-		c.width = _w;
-		c.height = _h;
+		// gyro.init();
+		accelerometer.start();
+
+		_c.width = _w;
+		_c.height = _h;
+		_jerkC.width = _w;
+		_jerkC.height = _h / 3;
 
 
 		_bgGrd = _ctx.createLinearGradient(_w / 2, 0, _w / 2, _h);
@@ -112,166 +135,220 @@
 		_grdVert.addColorStop(1, "#BDF5FD");
 
 
-		_ctx.fillStyle = _bgGrd;
+		_jCtx.fillStyle = _ctx.fillStyle = _bgGrd;
 		_ctx.fillRect(0,0,_w,_h);
+		_jCtx.fillRect(0,0,_w,_h/3);
+		_jCtx.strokeStyle = _grd; 
 
-		_ctx.lineJoin = 'butt';
-		_ctx.lineCap = 'round';
+		_jCtx.lineJoin = _ctx.lineJoin = 'butt';
+		_jCtx.lineCap = _ctx.lineCap = 'round';
+		var count = 0;
+		start = new Date().getTime();
+		
+		interval = setInterval(function(){
 
-		setInterval(function(){
-			now = new Date().getTime();
-			dt = now - before;
-			dt /= 1000;
-			data.t.push(now);
+			sampleData = accelerometer.readData();
+			
+			now = sampleData.t;
+			dt = (now - before) / 1000;
+			
 
-			sampleData = gyro.getData();
 
-			sampleData.ax = Math.abs(sampleData.ax) > 0.0 ? sampleData.ax : 0;
-			sampleData.ay = Math.abs(sampleData.ay) > 0.0 ? sampleData.ay : 0;
-			sampleData.az = Math.abs(sampleData.az) > 0.0 ? sampleData.az : 0;
-
-			data.ax.push(sampleData.ax);
-
-			// determine jerk alongside x:
-			jx = sampleData.ax - data.ax[sampleCount] / dt;
-			vx = sampleData.ax * dt + data.vx[sampleCount] * .99;
-			dx = vx * dt + data.dx[sampleCount];
-
-			data.jx.push(jx);
-			data.vx.push(vx);
-			data.dx.push(dx);
-
-			data.ay.push(sampleData.ay);
-			// determine jerk alongside y:
-			jy = sampleData.ay - data.ay[sampleCount] / dt;
-			vy = sampleData.ay * dt + data.vy[sampleCount] * .99;
-			dy = vy * dt + data.dy[sampleCount];
-
-			data.jy.push(jy);
-			data.vy.push(vy);
-			data.dy.push(dy);
-
-			data.az.push(sampleData.az);
-			// determine jerk alongside y:
-			jz = sampleData.az - data.az[sampleCount] / dt;
-			vz = sampleData.az * dt + data.vz[sampleCount] * .99;
-			dz = vz * dt + data.dz[sampleCount];
-
-			data.jz.push(jz);
-			data.vz.push(vz);
-			data.dz.push(dz);
-
-			// visualize acceleration:
-			// xp += data.vx[sampleCount + 1] * dt * 20;
-			// yp += data.vy[sampleCount + 1] * dt * 20;
-			// xp = clamp(xp, 5, w-5);
-			// yp = clamp(yp, 5, h-5);
-
-			_ctx.lineWidth = Math.max(6 + sampleData.az * 2, 1);
+			_ctx.lineWidth = Math.max(6 + sampleData.acceleration.z * 2, 1);
 			_ctx.strokeStyle = _grd;
 	        _ctx.beginPath();
 
 	        // plot vertical acceleration:
 	        var x1 = Math.floor(sliceWidth * (before - start));
-	        var y1 = Math.floor(clamp((_h - data.ay[sampleCount] * -10) / 2, 2, _h - 2));
+	        var y1 = Math.floor(clamp((_h - ((data) ? data.acceleration.y : 0) * -20) / 2, 2, _h - 2));
 	        var x2 = Math.floor(sliceWidth * (now - start));
-	        var y2 = Math.floor(clamp((_h - sampleData.ay * -10) / 2, 2, _h-2));
+	        var y2 = Math.floor(clamp((_h - sampleData.acceleration.y * -20) / 2, 2, _h-2));
 
 	        _ctx.moveTo(x1, y1);
-	        _ctx.lineTo(x2, y2);
-			_ctx.stroke();
-
-			// plot horizontal accelaration:
-			_ctx.strokeStyle = _grdVert;
-	        _ctx.beginPath();
-	        x1 = Math.floor(clamp((_w - data.ax[sampleCount] * -10) / 2, 2, _w - 2));
-	        y1 = _h - Math.floor(sliceHeight * (before - start));
-	        x2 = Math.floor(clamp((_w - sampleData.ax * -10) / 2, 2, _w-2));
-	        y2 = _h - Math.floor(sliceHeight * (now - start));
-
-	        _ctx.moveTo(x1, y1);
-	        var midPoint = midPointBtwn({x:x1, y:y1}, {x:x2,y:y2});
+			var midPoint = midPointBtwn({x:x1, y:y1}, {x:x2,y:y2});
 
 	        // _ctx.lineTo(x2, y2);
 	        _ctx.quadraticCurveTo(x1, y1, midPoint.x, midPoint.y);
 	        _ctx.quadraticCurveTo(midPoint.x, midPoint.y, x2, y2);
 			_ctx.stroke();
 
+			// plot horizontal accelaration:
+			_ctx.strokeStyle = _grdVert;
+	        _ctx.beginPath();
+	        x1 = Math.floor(clamp((_w - ((data) ? data.acceleration.x : 0) * -20) / 2, 2, _w - 2));
+	        y1 = _h - Math.floor(sliceHeight * (before - start));
+	        x2 = Math.floor(clamp((_w - sampleData.acceleration.x * -20) / 2, 2, _w-2));
+	        y2 = _h - Math.floor(sliceHeight * (now - start));
+
+	        _ctx.moveTo(x1, y1);
+			var midPoint = midPointBtwn({x:x1, y:y1}, {x:x2,y:y2});
+
+	        // _ctx.lineTo(x2, y2);
+	        _ctx.quadraticCurveTo(x1, y1, midPoint.x, midPoint.y);
+	        _ctx.quadraticCurveTo(midPoint.x, midPoint.y, x2, y2);
+			_ctx.stroke();
+
+			var lastEnergy = Math.abs(sampleData.total.acceleration.x) + Math.abs(sampleData.total.acceleration.y) + Math.abs(sampleData.total.acceleration.z);
+
+			
 			before = now;
 
-	        
 	        // min/max:
 	        // loop around the canvas when we reach the end
 			sampleCount++;
 
 
-			if (sampleCount >= _bufferLength) {
-				data.ax.shift();
-				data.ay.shift();
-				data.az.shift();
-				data.vx.shift();
-				data.vy.shift();
-				data.vz.shift();
-				data.dx.shift();
-				data.dy.shift();
-				data.dz.shift();
-				data.jx.shift();
-				data.jy.shift();
-				data.jz.shift();
-				sampleCount--;
-			}
 	        
 	        if(now - start > samplingPeriod) {
-	        	sampleCount = 0;
-	        	data = {
-				
-				// time:
-				t : [0],
+	        	accelerometer.stop();
+	        	// determine mood:
+	        	var energy = (Math.abs(sampleData.avg.acceleration.x) + Math.abs(sampleData.avg.acceleration.y) + Math.abs(sampleData.avg.acceleration.z)) / 3;
+	        	var stress = (Math.abs(sampleData.avg.jerk.x) + Math.abs(sampleData.avg.jerk.y) + Math.abs(sampleData.avg.jerk.z)) / 3;
+	        	clearInterval(interval);
 
-				// left and right:
-				ax : [0],
-				jx : [0],
-				vx : [0],
-				dx : [0],
-				
-				// up and down:
-				ay : [0],
-				jy : [0],
-				vy : [0],
-				dy : [0],
-				// forward and back:
-				az : [0],
-				jz : [0],
-				vz : [0],
-				dz : [0]
+				var resultStr = 'energy= ' + (+energy).toFixed(2) + ' stress= ' +(+stress).toFixed(2)+'\n';
+	        	if ( energy < 1 ) {
+	        		energy = 0;	// 'calm'
+	        	} else if ( energy < 3 ) {
+	        		energy = 1;	// 'low'
+	        	} else if ( energy < 6 ) {
+	        		energy = 2;	// 'moderate'
+	        	} else if ( energy < 9 ) {
+	        		energy = 3; // 'hard'
+	        	} else {
+	        		energy = 4;	// 'very hard'
+	        	}
 
-			};
-	            start = now;
-	            _ctx.fillStyle = _bgGrd;
-	            _ctx.fillRect(0,0,_w,_h);
+	        	if ( stress < 10 ) {
+	        		stress = 0;	// 'low'
+	        	} else if ( stress < 120 ) {
+	        		stress = 1;	// 'moderate'
+	        	} else if ( stress < 300 ) {
+	        		stress = 2;	// 'high'
+	        	} else {
+	        		stress = 3;	// 'very high'
+	        	}
+
+
+	        	var moodIndex = energy * 5 + stress;
+	        	_ctx.textAlign = 'center';
+	        	_ctx.font = '120px Tahoma';
+	       		_ctx.strokeStyle = _bgGrd;
+	       		_ctx.strokeWidth = 2;
+	       		_ctx.strokeText(moodMatrix[moodIndex], _w / 2, _h / 2);
+	        	_ctx.fillStyle = moodColors[moodIndex];
+	       		_ctx.fillText(moodMatrix[moodIndex], _w / 2, _h / 2);
+
+	   //      	plotJerk();
+
+	        	resultStr += 'energy= ' + energy + '; stress= '+stress;
+	        	var b = document.getElementById('example');
+	        	b.innerHTML = resultStr;
+
 	        }
-
-
 
 			var b = document.getElementById('example'),
 				f = document.getElementById('features');
-			f.innerHTML = gyro.getFeatures();
+			// f.innerHTML = gyro.getFeatures();
 
+			data = $.extend(true, {}, sampleData);
+			utils.printify(data);
 			b.innerHTML = 
-				"<p> dt = " + dt + "s </p><br>" + 
-				"<p> ax = " + sampleData.ax + " m/s^2</p>" +
-				"<p> vx = " + vx + "</p>" +
-				"<p> dx = " + dx + "</p>" +
-				"<p> jx = " + jx + "</p>" +
-				"<br><p> ay = " + sampleData.ay + " m/s^2</p>" +
-				"<p> vy = " + vy + "</p>" +
-				"<p> dy = " + dy + "</p>" +
-				"<p> jy = " + jy + "</p>" +
-				"<br><p> az = " + sampleData.az + " m/s^2</p>" +
-				"<p> vz = " + vz + "</p>" +
-				"<p> dz = " + dz + "</p>" +
-				"<p> jz = " + jz + "</p>";
+                "<p> j avg = (" + data.avg.jerk.x + ', ' + data.avg.jerk.y + ', ' + data.avg.jerk.z + ')</p>' +
+                "<p> j max = (" + data.max.jerk.x + ', ' + data.max.jerk.y + ', ' + data.max.jerk.z + ')</p>' +
+                "<p> j min = (" + data.min.jerk.x + ', ' + data.min.jerk.y + ', ' + data.min.jerk.z + ')</p>' +
+                "<p> d = (" + data.total.displacement.x + ', ' + data.total.displacement.y + ', ' + data.total.displacement.z + ')</p>' +
+                "<p> v avg = (" + data.avg.velocity.x + ', ' + data.avg.velocity.y + ', ' + data.avg.velocity.z + ')</p>' +
+                "<p> a avg = (" + data.avg.acceleration.x + ', ' + data.avg.acceleration.y + ', ' + data.avg.acceleration.z + ')</p>' +
+                "<p> a max = (" + data.max.acceleration.x + ', ' + data.max.acceleration.y + ', ' + data.max.acceleration.z + ')</p><br>' +
+                "<p> a min = (" + data.min.acceleration.x + ', ' + data.min.acceleration.y + ', ' + data.min.acceleration.z + ')</p><br>' +
+                "<p> dt = " + dt + "s </p><br>" + 
+                "<p> ax = " + sampleData.acceleration.x + " m/s^2</p>" +
+                "<p> vx = " + sampleData.velocity.x + "</p>" +
+                "<p> dx = " + sampleData.displacement.x + "</p>" +
+                "<p> jx = " + sampleData.jerk.x + "</p>" +
+                "<br><p> ay = " + sampleData.acceleration.y + " m/s^2</p>" +
+                "<p> vy = " + sampleData.velocity.y + "</p>" +
+                "<p> dy = " + sampleData.displacement.y + "</p>" +
+                "<p> jy = " + sampleData.jerk.y + "</p>" +
+                "<br><p> az = " + sampleData.acceleration.z + " m/s^2</p>" +
+                "<p> vz = " + sampleData.velocity.z + "</p>" +
+                "<p> dz = " + sampleData.displacement.z + "</p>" +
+                "<p> jz = " + sampleData.jerk.z + "</p>";
 		}, 10);
+
+		function plotJerk () {
+			if (!isShakey(data.zeroCrossings)) {
+				if (isSideToSide(data.zeroCrossings)) {
+					console.log('side-to-side');
+				} else {
+					console.log('smooth');
+				}
+			} else {
+				console.log('shakey');
+			}
+
+			_jCtx.beginPath();
+			_jCtx.moveTo(0, _h / 6);
+
+			for ( var i = 1; i < sampleCount; i++ ) {
+				var jerkNow = data.jx[i] + data.jy[i] + data.jz[i];
+				var jerkBefore = data.jx[i-1] + data.jy[i-1] + data.jz[i-1];
+				
+				var before = data.t[i - 1];
+				var now = data.t[i];
+		        var x1 = Math.floor(sliceWidth * (before - start));
+		        var y1 = Math.floor(clamp((_h/3 - jerkBefore) / 2, 2, _h/3- 2));
+		        var x2 = Math.floor(sliceWidth * (now - start));
+		        var y2 = Math.floor(clamp((_h/3 - jerkNow * -20) / 2, 2, _h/3-2));
+
+		        var midPoint = midPointBtwn({x:x1, y:y1}, {x:x2,y:y2});
+
+		        _jCtx.quadraticCurveTo(x1, y1, midPoint.x, midPoint.y);
+		        _jCtx.quadraticCurveTo(midPoint.x, midPoint.y, x2, y2);
+			}
+			_jCtx.stroke();
+		};
+
+
+		// function plotAverageAcceleration() {
+		// 	_aCtx.beginPath();
+		// 	_aCtx.moveTo(0, _h / 6);
+		// 	var accSum = data.ax[0];
+		// 	for ( var i = 1; i < sampleCount; i++ ) {
+		// 		var accNow = data.ax[i] + data.ay[i] + data.az[i];
+		// 		accSum += accNow;
+
+				
+				
+		// 		var before = data.t[i - 1];
+		// 		var now = data.t[i];
+		//         var x1 = Math.floor(sliceWidth * (before - start));
+		//         var y1 = Math.floor(clamp((_h/3 - accBefore) / 2, 2, _h/3- 2));
+		//         var x2 = Math.floor(sliceWidth * (now - start));
+		//         var y2 = Math.floor(clamp((_h/3 - accNow * -20) / 2, 2, _h/3-2));
+
+		//         var midPoint = midPointBtwn({x:x1, y:y1}, {x:x2,y:y2});
+
+		//         _aCtx.quadraticCurveTo(x1, y1, midPoint.x, midPoint.y);
+		//         _aCtx.quadraticCurveTo(midPoint.x, midPoint.y, x2, y2);
+		// 	}
+		// 	_aCtx.stroke();
+		// }
+
+		// takes in an array vector of zero crossings:
+		// var isShakey = function (zeroCrossings) {
+		// 	console.log(zeroCrossings);
+		// 	var count = (zeroCrossings[0] > shakeyMinThreshold) + 
+		// 		(zeroCrossings[1] > shakeyMinThreshold) + 
+		// 		(zeroCrossings[2] > shakeyMinThreshold);
+		// 	return count > 1;
+		// }
+
+		// var isSideToSide = function (zeroCrossings) {
+		// 	var enoughInX = zeroCrossings[0] < sideToSideMaxThreshold && zeroCrossings[0] > sideToSideMinThreshold;
+		// 	return enoughInX && zeroCrossings[1] < sideToSideMaxThreshold / 2 && zeroCrossings[2] < sideToSideMaxThreshold / 2; 
+		// } 
 	});
 	</script>
 </body>
